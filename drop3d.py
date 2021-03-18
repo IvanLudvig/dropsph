@@ -14,6 +14,13 @@ from pysph.sph.basic_equations import XSPHCorrection
 import gmsh
 import matplotlib.pyplot as plt
 
+from pysph.sph.wc.transport_velocity import VolumeFromMassDensity,\
+    ContinuityEquation,\
+    MomentumEquationPressureGradient, \
+    MomentumEquationArtificialViscosity,\
+    SolidWallPressureBC
+
+
 # domain and reference values
 height = 0.5
 gy = -9.8
@@ -86,7 +93,7 @@ class Drop(Application):
         walls_y = []
         walls_z = []
         for i in range(x.size):
-            if (y[i] < (min_y + wall_thickness)) or ((y[i] <= (min_y + 5*wall_thickness))and((x[i] >= (max_x - wall_thickness)) or (z[i] >= (max_z - wall_thickness))) or ((x[i] <= (min_x + wall_thickness)) or (z[i] <= (min_z + wall_thickness)))):
+            if (y[i] < (min_y + wall_thickness)) or ((y[i] <= (min_y + 5*wall_thickness))and((x[i] >= (max_x - 2*wall_thickness)) or (z[i] >= (max_z - 2*wall_thickness))) or ((x[i] <= (min_x + wall_thickness)) or (z[i] <= (min_z + wall_thickness)))):
                 walls_x.append(x[i])
                 walls_y.append(y[i])
                 walls_z.append(z[i])
@@ -168,17 +175,19 @@ class Drop(Application):
                     sources=None,
                     rho0=rho0,
                     c0=c0,
-                    gamma=gamma)
-            ], ),
-
-            # The boundary conditions are imposed by extrapolating the fluid
-            # pressure, taking into considering the bounday acceleration
-            Group(equations=[
-                SolidWallPressureBC(dest='walls', sources=['liquid'], b=1.0, gy=gy,
-                                    rho0=rho0, p0=p0),
+                    gamma=gamma),
+                TaitEOS(
+                    dest='walls',
+                    sources=None,
+                    rho0=rho0,
+                    c0=c0,
+                    gamma=gamma),
             ], ),
 
             # Main acceleration block. The boundary conditions are imposed by
+            # peforming the continuity equation and gradient of pressure
+            # calculation on the solid phase, taking contributions from the
+            # fluid phase
             Group(equations=[
 
                 # Continuity equation

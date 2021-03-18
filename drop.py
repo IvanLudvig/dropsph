@@ -14,14 +14,6 @@ from pysph.sph.basic_equations import XSPHCorrection
 import gmsh
 import matplotlib.pyplot as plt
 
-# Equations for REF1
-from pysph.sph.wc.transport_velocity import VolumeFromMassDensity,\
-    ContinuityEquation,\
-    MomentumEquationPressureGradient, \
-    MomentumEquationArtificialViscosity,\
-    SolidWallPressureBC
-
-
 # domain and reference values
 height = 1.0
 gy = -9.8
@@ -41,7 +33,7 @@ dt_force = 0.25 * np.sqrt(h0 / abs(gy))
 
 tf = 3.0
 dt = min(dt_cfl, dt_force)
-output_at_times = np.arange(0.25, 4.5, 0.25)
+output_at_times = np.arange(0.25, 3.5, 0.25)
 
 wall_thickness = dx
 
@@ -150,35 +142,34 @@ class Drop(Application):
                     rho0=rho0,
                     c0=c0,
                     gamma=gamma),
+                TaitEOS(
+                    dest='walls',
+                    sources=None,
+                    rho0=rho0,
+                    c0=c0,
+                    gamma=gamma),
             ], ),
 
-            # The boundary conditions are imposed by extrapolating the fluid
-            # pressure, taking into considering the bounday acceleration
-            Group(equations=[
-                SolidWallPressureBC(dest='walls', sources=['liquid'], b=1.0, gy=gy,
-                                    rho0=rho0, p0=p0),
-            ], ),
-
-            # Main acceleration block
+            # Main acceleration block. The boundary conditions are imposed by
+            # peforming the continuity equation and gradient of pressure
+            # calculation on the solid phase, taking contributions from the
+            # fluid phase
             Group(equations=[
 
                 # Continuity equation
-                ContinuityEquation(
-                    dest='liquid', sources=[
-                        'liquid', 'walls']),
+                ContinuityEquation(dest='liquid', sources=['liquid', 'walls']),
+                ContinuityEquation(dest='walls', sources=['liquid']),
 
                 # Pressure gradient with acceleration damping.
                 MomentumEquationPressureGradient(
-                    dest='liquid', sources=['liquid', 'walls'], pb=0.0, gy=gy,
-                    tdamp=tdamp),
+                    dest='liquid', sources=['liquid', 'walls'], pb=0.0, gy=gy),
 
                 # artificial viscosity for stability
                 MomentumEquationArtificialViscosity(
-                    dest='liquid', sources=['liquid', 'walls'], alpha=0.24, c0=c0),
+                    dest='liquid', sources=['liquid', 'walls'], alpha=0.25, c0=c0),
 
                 # Position step with XSPH
-                XSPHCorrection(dest='liquid', sources=['liquid'], eps=0.0)
-
+                XSPHCorrection(dest='liquid', sources=['liquid'], eps=0.5)
             ]),
         ]
 
