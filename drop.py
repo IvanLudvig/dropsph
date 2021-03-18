@@ -14,6 +14,14 @@ from pysph.sph.basic_equations import XSPHCorrection
 import gmsh
 import matplotlib.pyplot as plt
 
+# Equations for REF1
+from pysph.sph.wc.transport_velocity import VolumeFromMassDensity,\
+    ContinuityEquation,\
+    MomentumEquationPressureGradient, \
+    MomentumEquationArtificialViscosity,\
+    SolidWallPressureBC
+
+
 # domain and reference values
 height = 1.0
 gy = -9.8
@@ -31,9 +39,9 @@ h0 = hdx * dx
 dt_cfl = 0.25 * h0 / (c0 + Vmax)
 dt_force = 0.25 * np.sqrt(h0 / abs(gy))
 
-tf = 5.0
-dt = 0.5 * min(dt_cfl, dt_force)
-output_at_times = np.arange(0.25, 5.5, 0.25)
+tf = 3.0
+dt = min(dt_cfl, dt_force)
+output_at_times = np.arange(0.25, 4.5, 0.25)
 
 wall_thickness = dx
 
@@ -118,9 +126,7 @@ class Drop(Application):
 
     def create_solver(self):
         kernel = QuinticSpline(dim=2)
-
         integrator = PECIntegrator(liquid=WCSPHStep())
-
         solver = Solver(kernel=kernel, dim=2, integrator=integrator,
                         tf=tf, dt=dt, output_at_times=output_at_times)
         return solver
@@ -136,8 +142,7 @@ class Drop(Application):
             ], ),
 
             # Equation of state is typically the Tait EOS with a suitable
-            # exponent gamma. The solid phase is treated just as a fluid and
-            # the pressure and density operations is updated for this as well.
+            # exponent gamma
             Group(equations=[
                 TaitEOS(
                     dest='liquid',
@@ -145,34 +150,35 @@ class Drop(Application):
                     rho0=rho0,
                     c0=c0,
                     gamma=gamma),
-                TaitEOS(
-                    dest='walls',
-                    sources=None,
-                    rho0=rho0,
-                    c0=c0,
-                    gamma=gamma),
             ], ),
 
-            # Main acceleration block. The boundary conditions are imposed by
-            # peforming the continuity equation and gradient of pressure
-            # calculation on the solid phase, taking contributions from the
-            # fluid phase
+            # The boundary conditions are imposed by extrapolating the fluid
+            # pressure, taking into considering the bounday acceleration
+            Group(equations=[
+                SolidWallPressureBC(dest='walls', sources=['liquid'], b=1.0, gy=gy,
+                                    rho0=rho0, p0=p0),
+            ], ),
+
+            # Main acceleration block
             Group(equations=[
 
                 # Continuity equation
-                ContinuityEquation(dest='liquid', sources=['liquid', 'walls']),
-                ContinuityEquation(dest='walls', sources=['liquid']),
+                ContinuityEquation(
+                    dest='liquid', sources=[
+                        'liquid', 'walls']),
 
                 # Pressure gradient with acceleration damping.
                 MomentumEquationPressureGradient(
-                    dest='liquid', sources=['liquid', 'walls'], pb=0.0, gy=gy),
+                    dest='liquid', sources=['liquid', 'walls'], pb=0.0, gy=gy,
+                    tdamp=tdamp),
 
                 # artificial viscosity for stability
                 MomentumEquationArtificialViscosity(
-                    dest='liquid', sources=['liquid', 'walls'], alpha=0.25, c0=c0),
+                    dest='liquid', sources=['liquid', 'walls'], alpha=0.24, c0=c0),
 
                 # Position step with XSPH
-                XSPHCorrection(dest='liquid', sources=['liquid'], eps=0.5)
+                XSPHCorrection(dest='liquid', sources=['liquid'], eps=0.0)
+
             ]),
         ]
 
