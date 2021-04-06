@@ -15,7 +15,7 @@ import gmsh
 import matplotlib.pyplot as plt
 
 # domain and reference values
-height = 0.5
+height = 1.4
 gy = -9.8
 Vmax = np.sqrt(abs(gy) * height)
 c0 = 10 * Vmax
@@ -23,7 +23,7 @@ rho0 = 1000.0
 gamma = 1.0
 
 # Numerical setup
-dx = 1 / 512
+dx = 1 / 64
 hdx = 1.0
 
 # adaptive time steps
@@ -32,10 +32,11 @@ dt_cfl = 0.25 * h0 / (c0 + Vmax)
 dt_force = 0.25 * np.sqrt(h0 / abs(gy))
 
 tf = 3.0
-dt = 0.5 * min(dt_cfl, dt_force)
+dt = 0.1 * min(dt_cfl, dt_force)
 output_at_times = np.arange(0.25, 3.5, 0.25)
 
-wall_thickness = 2*dx
+wall_thickness = 4*dx
+water_height = 0.5
 
 
 class Drop(Application):
@@ -49,20 +50,20 @@ class Drop(Application):
         y = nodesCoord[2::3]/600
         y = y + abs(min(y)) + height
 
-        x = x[0::10]
-        y = y[0::10]
+        x = x[0::50]
+        y = y[0::50]
 
-        return x, y
+        return list(x), list(y)
 
 
     def create_particles(self):
         liquid_x, liquid_y = self.particles_from_model('wheel.msh')
 
-        min_x = min(liquid_x) - 500*dx
-        max_x = max(liquid_x) + 500*dx
+        min_x = min(liquid_x) - 1
+        max_x = max(liquid_x) + 1
 
         min_y = 0
-        max_y = max(liquid_y) + 500*dx
+        max_y = max(liquid_y) + water_height + 1
 
         _x = np.arange(min_x, max_x, dx)
         _y = np.arange(min_y, max_y, dx)
@@ -73,9 +74,12 @@ class Drop(Application):
         walls_x = []
         walls_y = []
         for i in range(x.size):
-            if (y[i] < (min_y + wall_thickness)) or (x[i] >= (max_x - wall_thickness)) or (x[i] <= (min_x + wall_thickness)):
+            if (y[i] <= (min_y + wall_thickness)) or (x[i] >= (max_x - wall_thickness)) or (x[i] <= (min_x + wall_thickness)) or (y[i] >= (max_y - wall_thickness)):
                 walls_x.append(x[i])
                 walls_y.append(y[i])
+            elif (y[i] <= min_y + water_height) and (y[i] >= min_y + 1.5*wall_thickness) and (x[i] >= min_x + 1.5*wall_thickness) and (x[i] <= max_x - 1.5*wall_thickness):
+                liquid_x.append(x[i])
+                liquid_y.append(y[i])            
 
         plt.scatter(liquid_x, liquid_y)
         plt.scatter(walls_x, walls_y)

@@ -19,10 +19,10 @@ from pysph.sph.wc.transport_velocity import VolumeFromMassDensity,\
     MomentumEquationPressureGradient, \
     MomentumEquationArtificialViscosity,\
     SolidWallPressureBC
-
+from pysph.sph.scheme import WCSPHScheme
 
 # domain and reference values
-height = 0.5
+height = 0.2
 gy = -9.8
 Vmax = np.sqrt(abs(gy) * height)
 c0 = 10 * Vmax
@@ -30,44 +30,61 @@ rho0 = 1000.0
 gamma = 1.0
 
 # Numerical setup
-dx = 0.01
+dx = 1 / 16
 hdx = 1.2
 
 # adaptive time steps
 h0 = hdx * dx
 dt_cfl = 0.25 * h0 / (c0 + Vmax)
-dt_force = 0.25 * np.sqrt(h0 / abs(gy))
+dt_force = 0.5 * np.sqrt(h0 / abs(gy))
 
 tf = 3.0
-dt = 2*min(dt_cfl, dt_force)
+# dt = 0.05 * min(dt_cfl, dt_force)
+# dt = 2e-4
 output_at_times = np.arange(0.25, 3.5, 0.25)
 
-wall_thickness = dx
+wall_thickness = 2*dx
+co = 10
+dt = 1e-5
 
 
 class Drop(Application):
-    def create_particles(self):
+
+    def particles_from_model(self, path):
         gmsh.initialize()
-        gmsh.open('wheel.msh')
+        gmsh.open(path)
         nodeTags, nodesCoord, parametricCoord = gmsh.model.mesh.getNodes()
 
-        liquid_x = nodesCoord[0::3]/600
-        liquid_y = nodesCoord[2::3]/600
-        liquid_z = nodesCoord[1::3]/600
-        liquid_y = liquid_y + abs(min(liquid_y)) + height
+        x = nodesCoord[2::3]
+        y = nodesCoord[1::3]
+        z = nodesCoord[0::3]
 
-        liquid_x = liquid_x[0::200]
-        liquid_y = liquid_y[0::200]
-        liquid_z = liquid_z[0::200]
+        scale = 1/(8*max(x))
+        x = x * scale
+        y = y * scale
+        z = z * scale
+        y = y + abs(min(y)) + height
 
-        min_x = min(liquid_x) - 50*dx
-        max_x = max(liquid_x) + 50*dx
+        x = x[0::400]
+        y = y[0::400]
+        z = z[0::400]
 
-        min_z = min(liquid_z) - 50*dx
-        max_z = max(liquid_z) + 50*dx
+        print(len(x))
+
+        return x, y, z
+
+
+    def create_particles(self):
+        liquid_x, liquid_y, liquid_z = self.particles_from_model('suriken.msh')
+
+        min_x = min(liquid_x) - 0.6
+        max_x = max(liquid_x) + 0.6
+
+        min_z = min(liquid_z) - 0.4
+        max_z = max(liquid_z) + 0.4
 
         min_y = 0
-        max_y = max(liquid_y)
+        max_y = max(liquid_y) + 0.6
 
         print(min_x, max_x)
         print(min_y, max_y)
@@ -81,19 +98,25 @@ class Drop(Application):
         print(_y.shape)
         print(_z.shape)
 
-
         x, y, z = np.meshgrid(_x, _y, _z)
 
         x = x.ravel()
         y = y.ravel()
         z = z.ravel()
 
-
         walls_x = []
         walls_y = []
         walls_z = []
         for i in range(x.size):
-            if (y[i] < (min_y + wall_thickness)) or ((y[i] <= (min_y + 5*wall_thickness))and((x[i] >= (max_x - 2*wall_thickness)) or (z[i] >= (max_z - 2*wall_thickness))) or ((x[i] <= (min_x + wall_thickness)) or (z[i] <= (min_z + wall_thickness)))):
+            left_edge = (x[i] <= (min_x + wall_thickness))
+            right_edge = (x[i] >= (max_x - wall_thickness))
+            back_edge = (z[i] <= (min_z + wall_thickness))
+            front_edge = (z[i] >= (max_z - wall_thickness))
+            bottom = (y[i] < (min_y + wall_thickness))
+            sides = (y[i] <= max_y)
+            top = (y[i] >= max_y - wall_thickness)
+
+            if bottom or top or (sides and ( left_edge or right_edge or back_edge or front_edge )):
                 walls_x.append(x[i])
                 walls_y.append(y[i])
                 walls_z.append(z[i])
@@ -101,12 +124,6 @@ class Drop(Application):
         # plt.scatter(liquid_x, liquid_y, liquid_z)
         # plt.scatter(walls_x, walls_y, walls_z)
         # # plt.gca().set_aspect('equal')
-        # plt.show()
-
-        # fig = plt.figure()
-        # ax = fig.add_subplot(111, projection='3d')
-        # ax.scatter(walls_x, walls_z, walls_y)
-        # ax.scatter(liquid_x, liquid_z, liquid_y)
         # plt.show()
 
         liquid = gpa(name='liquid', x=liquid_x, y=liquid_y, z=liquid_z)
@@ -128,10 +145,10 @@ class Drop(Application):
             liquid.add_property(name)
 
         liquid.rho[:] = rho0
-        walls.rho[:] = rho0
+        walls.rho[:] = 5*rho0
 
         liquid.rho0[:] = rho0
-        walls.rho0[:] = rho0
+        walls.rho0[:] = 5*rho0
 
         # mass is set to get the reference density of rho0
         volume = dx * dx
@@ -147,14 +164,18 @@ class Drop(Application):
         liquid.h[:] = hdx * dx
         walls.h[:] = hdx * dx
 
+        # print(dt)
+
+        liquid.set_output_arrays(['x', 'y', 'z', 'u', 'w', 'v'])
+        walls.set_output_arrays(['x', 'y', 'z', 'u', 'w', 'v'])
         # return the particle list
         return [liquid, walls]
 
     def create_solver(self):
-        kernel = QuinticSpline(dim=2)
-        integrator = PECIntegrator(liquid=WCSPHStep())
+        kernel = CubicSpline(dim=3)
+        integrator = PECIntegrator(liquid=WCSPHStep(), walls=WCSPHStep())
         solver = Solver(kernel=kernel, dim=3, integrator=integrator,
-                        tf=tf, dt=dt, output_at_times=output_at_times)
+                        tf=tf, dt=dt, adaptive_timestep=False, output_at_times=output_at_times)
         return solver
 
     def create_equations(self):
@@ -179,7 +200,7 @@ class Drop(Application):
                 TaitEOS(
                     dest='walls',
                     sources=None,
-                    rho0=rho0,
+                    rho0=5*rho0,
                     c0=c0,
                     gamma=gamma),
             ], ),
@@ -192,7 +213,7 @@ class Drop(Application):
 
                 # Continuity equation
                 ContinuityEquation(dest='liquid', sources=['liquid', 'walls']),
-                ContinuityEquation(dest='walls', sources=['liquid']),
+                ContinuityEquation(dest='walls', sources=['walls', 'liquid']),
 
                 # Pressure gradient with acceleration damping.
                 MomentumEquationPressureGradient(
